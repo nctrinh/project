@@ -1,0 +1,12 @@
+{
+    "options": {
+        "runmode": "normal",
+        "cmd": "./antiuav_fpga --manifest /path/to/data_manifest.json --split val --max-sequences 1 --no-video --output-dir trace_results",
+        "output": ""
+    },
+    "trace": {
+        "enable_trace_list": ["vitis-ai-library", "vart", "custom"]
+    },
+    "trace_custom": ["antiuav::motion_core", "antiuav::decode_dpu_outputs", "antiuav::filter_motion_candidates",
+                     "antiuav::SimpleTrackerFSM::step", "antiuav::SotPipeline::finish_step"]
+}

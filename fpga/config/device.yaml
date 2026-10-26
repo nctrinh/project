@@ -1,0 +1,31 @@
+# fpga/config/device.yaml
+#
+# ALL board / DPU specific settings live here (nothing device-specific is
+# hard-coded in the C++). Algorithm parameters stay in fpga_constraints.yaml
+# (a copy of configs1/fpga_constraints.yaml - keep the two in sync).
+# Relative paths are resolved against THIS file's directory.
+
+board:
+  name: "TODO"                 # TODO(board): e.g. ZCU102 / ZCU104 / KV260 / VCK190 ...
+
+dpu:
+  arch: "TODO"                 # TODO(board): informational, e.g. DPUCZDX8G_ISA1_B4096 (must match the
+                               #   arch.json used by vai_c_xir, see scripts/compile.sh)
+  fingerprint: "TODO"          # TODO(board): informational, `xdputil query` on the board
+  xmodel_path: "../model/yolov8_det.xmodel"   # copy compiled/yolov8_det.xmodel here
+  subgraph_index: 0            # the YOLOv8DPU export should compile to ONE DPU subgraph
+  num_runners: 1               # TODO(board): number of DPU cores (xdputil query) - >1 lets frames overlap
+  timeout_ms: -1               # runner->wait() timeout, -1 = wait forever
+  reg_max: 16                  # YOLOv8 DFL bins (validated against the xmodel output shapes)
+  num_classes: 1               # single class "uav"
+
+cpu:
+  cv_num_threads: -1           # TODO(board): cv::setNumThreads; -1 = OpenCV default (all cores)
+  pipeline_depth: 2            # frames in flight in the parallel stage (DPU || motion core)
+  reader_queue: 4              # decoded frames prefetched by the reader thread
+  writer_queue: 8              # frames waiting for overlay + video encoding
+
+output:
+  video_fourcc: "mp4v"         # TODO(board): depends on the board's OpenCV build; fallback "MJPG" + ".avi"
+  video_ext: ".mp4"
+  video_fps: 15                # same as utils/viz.py::SequenceVideoWriter

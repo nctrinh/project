@@ -1,0 +1,153 @@
+# configs/fpga_constraints.yaml
+#
+# NGUON SU THAT DUY NHAT cho moi gioi han kich thuoc co dinh trong pipeline.
+# Moi module trong src/antiuav_sot/* PHAI doc cac gia tri nay thay vi hard-code
+# hoac de numpy/torch tu suy ra shape dong.
+#
+# Nguyen tac: neu mot con so o day thay doi, no phai anh huong toan bo pipeline
+# mot cach nhat quan (vi du: doi max_det_boxes se lam vector so sanh IoU trong
+# tracker doi kich thuoc theo, khong duoc de rieng mot module tu gioi han khac).
+#
+# Cac gia tri nay tuong ung 1-1 voi cac tham so RTL se dung khi port sang FPGA
+# (Bang 1, muc 3.3, 3.4, 3.5, 4.4 trong bao cao thiet ke FPGA).
+
+# ---- Anh dau vao (IR / thermal, grayscale) ----
+image:
+  height: 512          # anh IR goc Anti-UAV: 512 x 640, 8-bit grayscale
+  width: 640
+  channels: 1           # grayscale mot kenh, KHONG phai RGB 3 kenh
+
+# ---- Detector nhe (YOLOv8-n/s, INT8) ----
+detector:
+  input_height: 512     # co the resize xuong neu bang FPGA gioi han bang thong
+  input_width: 640
+  max_det_boxes: 12      # so box toi da SAU NMS on-chip, moi khung hinh (muc 3.3)
+  conf_threshold: 0.3
+  nms_iou_threshold: 0.6
+
+# ---- Motion cue (frame-diff + block threshold, thay ViBe) ----
+motion:
+  block_size: 16              # kich thuoc khoi vuong (8x8 hoac 16x16), muc 3.2
+
+  block_sum_threshold: 800    # nguong tong D(x,y) trong 1 block de danh dau motion candidate
+  # SUA LOI CAU HINH: gia tri cu = 0 tat hoan toan nhanh motion (0 slot output
+  # -> gradient_motion_candidates() luon tra ve toan bo INVALID_BOX). Voi gia
+  # tri nay, KHONG mot co che nao trong 8 van de fusion (bao gom ca code MOI
+  # sua trong lan cap nhat nay) tung duoc thuc thi trong thuc te - xem
+  # update_log.md, muc "Config bug phat hien them". Dat = 8, mot con so vua
+  # du de bat vai fragment/frame ma khong lam qua tai candidate list.
+  max_motion_candidates: 20   # so candidate toi da moi khung hinh (muc 3.2, bat buoc de merge)
+  min_box_size: 4         # BẮT BUỘC - cạnh ngắn nhất chấp nhận (px, cả w và h)
+  max_box_size: 64        # BẮT BUỘC - cạnh dài nhất chấp nhận (px)
+  merge_gap_ratio: 0.5    # BẮT BUỘC - gộp box cách nhau < ratio * min(duong cheo hai box)
+
+  # ---- TUY CHON - xem update_log.md Issue 7/8/3/6 ----
+  max_aspect_ratio: 5.0        # loai box/cum co ty le canh dai:ngan > gia tri nay (Issue 7/8)
+  merge_min_fill_ratio: 0.15   # gop cum chi duoc chap nhan neu box hop nhat dac >= ty le nay (Issue 8)
+
+  size_adapt_enabled: true        # bat dong bo min/max_box_size theo lich su detector (Issue 3)
+  size_adapt_window: 30            # so mau kich thuoc detector gan nhat dung de uoc luong
+  size_adapt_shrink_factor: 0.6    # he so co vao percentile thap -> min_box_size dong
+  size_adapt_grow_factor: 1.6      # he so nhan vao percentile cao -> max_box_size dong
+  size_adapt_min_samples: 5        # can it nhat tung nay mau truoc khi tin gia tri dong
+
+  candidate_anchor_iou: 0.05   # nguong "neo" candidate trung track/tentative dang theo doi (Issue 6)
+
+  # ---- TUY CHON - nhanh gradient motion; chon gia tri bang scripts/eval_motion.py
+  # (CLI cua eval_motion/visualize_motion mac dinh doc cac gia tri nay) ----
+  frame_lag: 5                 # so sanh frame t voi frame t-lag (motion/frame_buffer.py)
+  strength_metric: "mean"       # sum | mean | contrast - cach tinh strength de xep hang top-K
+  min_strength: null           # bo box co strength < nguong; null = khong loc (contrast co the am)
+                               # box trung track/tentative dang theo doi duoc mien loc nay
+  thresh_factor: 2.5           # nguong residual = mean + thresh_factor * std
+
+
+
+
+  min_area: 20                 # dien tich toi thieu (px) cua mot connected component
+  model: "affine"              # affine | translation - mo hinh chuyen dong camera
+  irls_iters: 3
+  huber_delta: 10.0
+  pyramid_levels: 2
+
+# ---- Merge (ghep detector + motion candidates) ----
+fusion:
+  # max_total_candidates PHAI = detector.max_det_boxes + motion.max_motion_candidates
+  # duoc kiem tra tu dong trong tests/test_pipeline_fixed_shapes.py
+  # (12 + 8 = 20, cap nhat theo max_motion_candidates o tren)
+  max_total_candidates: 32
+
+# ---- Simple Tracker FSM ----
+tracker:
+  n_track_slots: 1              # N=1 cho Single-Object Tracking (Phuong an A, muc 4.2)
+                                 # doi thanh N=16 neu chuyen sang Phuong an B (Multi-Object)
+  # Nguong IoU cho 4 tang lien ket, theo dung thu tu bai goc:
+  # Tang 1: Middle Score Linking (detector, conf trung binh)
+  # Tang 2: Motion Boxes Linking (motion, nguong IoU cao hon de bu do tin cay thap)
+  # Tang 3: High Score Initiation (detector, conf rat cao, khoi tao track moi)
+  # Tang 4: Low Score Linking (du phong cuoi cung, nguong noi long)
+  tier1_iou_threshold: 0.3
+  tier1_conf_min: 0.7
+  tier2_iou_threshold: 0.5       # cao hon tier1 vi motion candidate kem tin cay hon
+  tier3_conf_min: 0.6            # nguong "high score" de khoi tao track moi
+  tier4_iou_threshold: 0.1       # nguong noi long nhat, du phong
+  max_track_age: 0               # so khung hinh lien tiep khong khop truoc khi track bi xoa (muc 3.5)
+
+  # ---- TUY CHON - kiem soat vai tro motion (Issue 2/4/5), xem update_log.md ----
+  max_consecutive_motion_matches: 5   # so khung hinh LIEN TIEP toi da track duoc phep chi
+                                       # khop boi MOTION (khong detector) truoc khi bi "khoa"
+                                       # (khong con duoc Tang 2/4 cap nhat) va tro thanh muc
+                                       # tieu uu tien cho Tang Confidence Override
+  override_conf_min: 0.6             # detector conf >= gia tri nay duoc phep "chiem lai" mot
+                                       # track - PHAI >= tier3_conf_min
+  override_iou_threshold: 0.001       # nguong IoU noi long danh rieng cho Tang Confidence
+                                       # Override - CHI con y nghia khi
+                                       # override_requires_overlap: true
+  override_requires_overlap: false    # false = TIN DETECTOR du KHONG chong lan: box detector
+                                       # conf >= override_conf_min chiem lai track ngay ca khi
+                                       # IoU = 0 (track da troi qua xa). Xep hang trong tang nay
+                                       # theo CONFIDENCE: box conf cao hon luon thang, du doi thu
+                                       # conf thap hon co chong lan. IoU (he so 1e-3) va khoang
+                                       # cach tam (1e-6) chi pha hoa khi conf gan bang nhau.
+                                       # true = hanh vi cu (phai co IoU >= override_iou_threshold)
+  override_motion_dragged_only: false # false = ap dung cho MOI track active.
+                                       # true = chi track da bi khoa motion-dragged (hanh vi cu)
+  # ---- Gate "track moi phai o gan track vua mat" ----
+  # Sau khi mat track, vi tri cuoi cung cua no duoc giu lam "ghost". Trong thoi
+  # gian ghost con han, track moi tao tu MOTION (tentative promote) hoac tu
+  # detector conf < reinit_trust_conf_min phai nam gan ghost. Vat that khong
+  # dich chuyen tuc thoi, nen mot track moi o goc khac cua anh gan nhu chac
+  # chan la nhieu nen.
+  reinit_near_lost_enabled: true
+  reinit_max_center_distance_ratio: 0.05  # ban kinh cho phep quanh ghost, theo ti le duong cheo
+                                       # anh (512x640 -> 820 px, 0.15 ~ 123 px)
+  reinit_lost_memory_frames: 120       # so khung hinh ghost con hieu luc. Qua han -> het chan
+                                       # (vat co the da di rat xa, hoac canh da doi han)
+  reinit_trust_conf_min: 0.6          # detector conf >= gia tri nay khoi tao track o BAT KY dau.
+                                       # PHAI >= tier3_conf_min. Bang tier3_conf_min = detector
+                                       # khong bao gio bi gate, chi gate nhanh motion
+
+  override_max_center_distance_ratio: 1.0  # gioi han khoang cach tam khi khop khong can chong
+                                       # lan, tinh theo ti le duong cheo anh (512x640 -> 820 px).
+                                       # 1.0 = khong gioi han thuc te; giam (vd 0.25) neu muon
+                                       # chan detector false-positive o goc anh keo track di
+
+# ---- Kalman filter (tuy chon) ----
+kalman:
+  enabled: false
+  state_dim: 4          # [x, y, vx, vy]
+  process_noise: 1.0e-2
+  measurement_noise: 1.0e-1
+  max_predict_only_frames: 5   # so khung hinh toi da du bao thuan Kalman khi mat track truoc khi coi la mat han
+  motion_measurement_noise: 25.0  # TÙY CHỌN - fallback = measurement_noise
+
+tentative_motion_tracks:
+  enabled: true
+  max_slots: 4              # số ứng viên motion theo dõi song song tối đa
+  iou_threshold: 0.3         # ngưỡng khớp giữa các khung hình liên tiếp
+  max_miss: 2                # số khung hình được phép mất dấu trước khi xóa ứng viên
+  confirm_frames: 4           # số khung hình liên tiếp cần để promote thành track thật
+  active_overlap_max_iou: 0.1 # candidate motion chồng lấn (IoU/containment) một track ĐANG
+                               # active vượt ngưỡng này bị loại khỏi vòng tentative - tránh
+                               # một track thật bị "nhân đôi" thành ứng viên tự-khởi-tạo giả
+                               # (Issue 2: Motion Priority Conflict)
