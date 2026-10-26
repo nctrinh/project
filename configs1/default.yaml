@@ -1,0 +1,80 @@
+# configs/default.yaml
+#
+# Hyperparameter cho train/eval tren GPU. Cac gioi han kich thuoc CO DINH
+# (fixed-size) nam rieng trong fpga_constraints.yaml va duoc nap chung voi
+# file nay o runtime (xem src/antiuav_sot/utils cach load ca hai config).
+
+fpga_constraints_path: "configs1/fpga_constraints.yaml"
+
+# ---- Duong dan du lieu ----
+data:
+  root_dir: "data/Anti-UAV/Train_Track1_2/train"
+  test_root_dir: "data/Anti-UAV/Train_Track1_2_without_label"
+  train_split: 0.85    # ty le seq dung cho train, phan con lai dung cho val
+  split_seed: 42
+  image_glob: ["*.jpg", "*.jpeg", "*.png"]   # ho tro nhieu dinh dang cung luc
+  negative_ratio: 1.0    # ty le frame KHONG co object (exist=0) duoc dua vao
+                          # train detector, so voi so frame CO object trong
+                          # cung sequence (1.0 = ngang bang). Xem
+                          # scripts/train_detector.py::convert_to_yolo_format
+                          # de biet ly do can negative sample.
+
+# ---- Train detector ----
+detector_train:
+  model_arch: "yolov8n"       # yolov8n | yolov8s
+  pretrained: true
+  epochs: 100
+  batch_size: 128
+  lr: 1.0e-3
+  weight_decay: 5.0e-4
+  optimizer: "adamw"
+  scheduler: "cosine"
+  warmup_epochs: 3
+  device: "cuda:0"
+  num_workers: 8
+  amp: true                    # mixed precision, chi de tang toc train tren GPU,
+                                # KHONG anh huong logic INT8 quantization sau nay
+  save_every: 10
+  output_dir: "experiments1/detector"
+  augmentation:
+    # scale: khoang scale ngau nhien ap dung cho anh khi augment (Ultralytics
+    # mac dinh la 0.5, nghia la anh co the bi thu/phong trong [1-0.5, 1+0.5]).
+    # Voi UAV la vat the RAT NHO, tang scale giup model thay object o nhieu
+    # kich thuoc pixel khac nhau hon trong qua trinh train - truc tiep giai
+    # quyet van de recall thap do object qua nho, kho hoc.
+    scale: 0.9
+    # fliplr/flipud: lat ngang/doc, khong lam bien dang hinh dang UAV nen
+    # an toan de bat manh.
+    fliplr: 0.5
+    flipud: 0.5
+    # translate: dich chuyen ngau nhien vi tri anh, giup model khong overfit
+    # vao vi tri UAV co dinh trong khung hinh.
+    translate: 0.2
+    # mosaic: ghep 4 anh lam 1, hoat dong tot voi object nho vi tao ra nhieu
+    # ty le/context khac nhau; giu mac dinh Ultralytics (1.0 = luon bat).
+    mosaic: 1.0
+    # hsv_h/hsv_s/hsv_v = 0.0: anh IR grayscale mot kenh, augmentation mau
+    # sac (hue/saturation/value) khong co y nghia, TAT hoan toan.
+    hsv_h: 0.0
+    hsv_s: 0.0
+    hsv_v: 0.0
+
+# ---- Quantization (QAT) ----
+quantization:
+  method: "qat"          # qat | ptq
+  calib_batches: 50       # so batch dung de calibrate neu method=ptq
+  qat_epochs: 10          # fine-tune epochs neu method=qat
+  qat_lr: 1.0e-4
+
+# ---- Eval tracker (full pipeline: detector + motion + fusion + FSM + Kalman) ----
+tracker_eval:
+  device: "cuda:0"
+  detector_checkpoint: "experiments/detector/weights/best.pt"
+  save_visualizations: true
+  viz_output_dir: "experiments1/eval_viz"
+  metrics: ["precision", "success"]   # theo chuan benchmark Anti-UAV (OPE)
+
+# ---- Logging ----
+logging:
+  level: "INFO"
+  log_dir: "experiments1/logs"

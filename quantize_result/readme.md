@@ -1,0 +1,1 @@
+I had bias_corr.pth, eval_report.json, quant_info.json, YOLOv8DPU_int.xmodel, YOLOv8DPU.py at this folder

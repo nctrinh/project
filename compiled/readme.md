@@ -1,0 +1,1 @@
+I had meta.json and yolov8_det.xmodel at this folder

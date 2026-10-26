@@ -1,0 +1,7 @@
+# Tu dong sinh boi scripts/train_detector.py - KHONG sua tay,
+# chay lai script de cap nhat.
+path: /mnt/tupm/antiuav_sot/experiments/yolo_dataset
+train: images/train
+val: images/val
+names:
+  0: uav
