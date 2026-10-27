@@ -12,11 +12,22 @@ CXX=${CXX:-g++}
 MODE=${1:-board}
 $CXX --version | head -1
 
-result=0 && pkg-config --list-all | grep opencv4 >/dev/null && result=1
-if [ $result -eq 1 ]; then
-    OPENCV_FLAGS=$(pkg-config --cflags --libs-only-L opencv4)
-else
-    OPENCV_FLAGS=$(pkg-config --cflags --libs-only-L opencv)
+# OpenCV: system pkg-config, or a conda env without sudo
+# (conda install -c conda-forge opencv pkg-config -> found through $CONDA_PREFIX/lib/pkgconfig).
+# Override completely with OPENCV_FLAGS="-I... -L..." ./build.sh mock
+if [ -n "$CONDA_PREFIX" ] && [ -d "$CONDA_PREFIX/lib/pkgconfig" ]; then
+    export PKG_CONFIG_PATH="$CONDA_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+fi
+if [ -z "$OPENCV_FLAGS" ]; then
+    if pkg-config --exists opencv4 2>/dev/null; then OPENCV_PC=opencv4
+    elif pkg-config --exists opencv 2>/dev/null; then OPENCV_PC=opencv
+    else
+        echo "ERROR: OpenCV C++ (headers + .pc) not found by pkg-config."
+        echo "  Without sudo: conda install -c conda-forge opencv pkg-config   (in the active env), then rerun,"
+        echo "  or set OPENCV_FLAGS=\"-I/path/include/opencv4 -L/path/lib\"."
+        exit 1
+    fi
+    OPENCV_FLAGS="$(pkg-config --cflags --libs-only-L $OPENCV_PC) -Wl,-rpath,$(pkg-config --variable=libdir $OPENCV_PC)"
 fi
 OPENCV_LIBS="-lopencv_videoio -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_core"
 
